@@ -16,10 +16,11 @@ pip install robobopy_audiostream
 The following script shows an example of the basic usage of this library:
 
 ``` python
-from robobo_audio.robobo_audio import RoboboAudio
+from robobopy_audiostream.RoboboAudio import RoboboAudio
+from robobopy.Robobo import Robobo
 import pyaudio
 
-SERVER_IP = "your_ip_here"
+SERVER_IP = "ROBOBO_IP"
 
 p = pyaudio.PyAudio()
 FORMAT = pyaudio.paInt16
@@ -33,6 +34,13 @@ stream = p.open(format=FORMAT,
                 output=True,
                 frames_per_buffer=CHUNK)
 
+
+rob = Robobo(SERVER_IP)
+rob.connect()
+
+rob.setAudioStreamBitrate(RATE)
+rob.startAudioStream()
+
 audio = RoboboAudio(SERVER_IP)
 audio.connect()
 
@@ -43,8 +51,13 @@ while True:
         if not audioData is None:
             data, ts, snc = audioData
             stream.write(data)
+        else:
+            break
     except KeyboardInterrupt:
         break
-        
+
+rob.stopAudioStream()
 audio.disconnect()
+
+rob.disconnect()
 ```
