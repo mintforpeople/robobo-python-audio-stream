@@ -4,52 +4,34 @@ class RoboboAudio:
     def __init__(self, ip, robot_id=0):
         self.port = 40406 + (robot_id * 10)
         self.ip = ip
-        self.socket = AudioSocket()
-
+        self.audio_socket = AudioSocket(self.ip, self.port)
+        
     def connect(self):
-        if (self.socket.connect(self.ip, self.port)):
-            self.socket.start_audio_thread()
-            self.socket.start_ping_thread()
+        if not self.audio_socket.connected:
+            self.audio_socket.start()
         else:
             print("Can't connect to server")
             
-    def _getAudioAux(self):
-        if not self.socket.lost_conection:
-            packet = self.socket.get_audio()
-            if packet is None:
-                self.disconnect()
-            else:
-                return packet
-        else:
-            print("Please connect to the server")
-
-    def getAudioBytes(self):
-        if not self.socket.lost_conection:
-            audioPacket = self._getAudioAux()
-            if not audioPacket is None:
-                raw_audio, ts, snc = self._getAudioAux()
-                return raw_audio
-            else:
-                return None
-        else:
-            print("Please connect to the server")
-        
-    def getAudioWithMetadata(self):
-        if not self.socket.lost_conection:
-            audioPacket = self._getAudioAux()
-            if not audioPacket is None:
-                raw_audio, ts, snc = self._getAudioAux()
-                return raw_audio, ts, snc
-            else:
-                return None
-        else:
-            print("Please connect to the server")
-
-    def syncAudioQueue(self):
-        if not self.socket.lost_conection:
-            self.socket.sync_audio()
-        else:
-            print("Please connect to the server")
-    
     def disconnect(self):
-        self.socket.disconnect()
+        if (self.audio_socket.connected):
+            self.audio_socket.stop()
+    
+    def getAudioBytes(self):
+        if (self.audio_socket.connected):
+            timestamp, parameter, audio_data = self.audio_socket.queue.get()
+            return audio_data
+        else:
+            return None
+    
+    def getAudioWithMetadata(self):
+        if (self.audio_socket.connected):
+            timestamp, parameter, audio_data = self.audio_socket.queue.get()
+            return (timestamp, parameter, audio_data)
+        else:
+            return None
+    
+    def syncAudioQueue(self):
+        self.audio_socket.emptyQueue()
+    
+    def isConnected(self):
+        return self.audio_socket.connected

@@ -1,123 +1,101 @@
-import socket as so
+import socket
 import threading
+import queue
 import time
-import copy
-from queue import Queue
-from queue import Empty
 
-PING_INTERVAL = 1
-BUFFER_SIZE = 4116
+from robobopy_audiostream.Exceptions import ClosedConnection
+
+MAX_ATTEMPTS = 5
 
 class AudioSocket:
-    def __init__(self, sockSend=None, sockRecv=None):
-        if sockSend is None:
-            self.sockSend = so.socket(so.AF_INET, so.SOCK_DGRAM)
-        else:
-            self.sockSend = sockSend
-        
-        if sockRecv is None:
-            self.sockRecv = so.socket(so.AF_INET, so.SOCK_DGRAM)
-        else:
-            self.sockRecv = sockRecv
+    def __init__(self, server_address, server_port):
+        self.server_address = server_address
+        self.server_port = server_port
+        self.socket = None
+        self.queue = queue.Queue()
+        self.connected = False
+        self.audio_thread = None
+        self.ping_thread = None
+        self.connect_attempts = MAX_ATTEMPTS
+ 
+    def connect(self):
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.socket.settimeout(2)
+        self.socket.bind(("", self.server_port))
 
-        self.audioQueue = Queue()
-        self.threadAudioRecv = None
-        self.threadMsgSend = None
-        self.lost_conection = True
+        self.send_message("CONNECT-AUDIO")
 
-        self.host = None
-        self.port = None
+        self.connect_attempts = MAX_ATTEMPTS
 
-    def __del__(self):
-        self.disconnect()
-
-    def get_audio(self):
-        if not self.lost_conection:
+        while not self.connected and self.connect_attempts > 0:
             try:
-                audioPacket = copy.copy(self.audioQueue.get(True, 1))
-            except Empty:
-                return None
-            if not audioPacket is None:
-                sound_data, timestamp, sync = audioPacket
-                return sound_data, timestamp, sync
-            else:
-                return None
-        else:
-            return None
-    
-    def sync_audio(self):
-        if not self.lost_conection and not self.audioQueue is None:
-            self.audioQueue = Queue()
+                print(f"Connecting to Audio Streaming Server: {self.server_address}")
+                data, _ = self.socket.recvfrom(4096)
+                if data:
+                    self.connected = True
+                    return True
+            except socket.timeout:
+                self.connect_attempts -= 1
 
-    def receive_audio(self):
-        MAX_TRIES = 5
-        tries = MAX_TRIES
-        while not self.lost_conection:
-            if tries <= 0:
-                self.lost_conection = True
-                break
-            try:
-                audioPacket = self.myreceive()
-                tries = MAX_TRIES
-                self.audioQueue.put(copy.copy(audioPacket))
-            except so.timeout:
-                tries -= 1
-
-    def send_ping(self):
-        while not self.lost_conection:
-            self._send_message("PING")
-            time.sleep(PING_INTERVAL)
-
-    def _send_message(self, message):
-        if self.host != None and self.port != None:
-            server_address = (self.host, self.port)
-            self.sockSend.sendto(message.encode(), server_address)
-
-    def start_audio_thread(self):
-        self.threadAudioRecv = threading.Thread(target=self.receive_audio)
-        self.threadAudioRecv.start()
-    
-    def start_ping_thread(self):
-        self.threadMsgSend = threading.Thread(target=self.send_ping)
-        self.threadMsgSend.start()
-
-    def connect(self, host, port):
-        MAX_TRIES = 5
-        self.host = host
-        self.port = port
-        self.sockRecv.bind(("", self.port))
-        self.sockRecv.settimeout(1)
-        self._send_message("CONNECT-AUDIO")
-        tries = MAX_TRIES
-        while True:
-            print(f"Connecting to {self.host}:{self.port}...")
-            if tries <= 0:
-                break
-            try:
-                data, _ = self.sockRecv.recvfrom(BUFFER_SIZE)
-                if not data is None:
-                    print("Succesfully connected")
-                    self.lost_conection = False
-                    break
-            except so.timeout:
-                tries -= 1
-        return not self.lost_conection
+        print(f"Failed to connect after {MAX_ATTEMPTS} attempts.")
+        return False
 
     def disconnect(self):
-        if not self.lost_conection:
-            self._send_message("DISCONNECT-AUDIO")
-        self.host = None
-        self.port = None
-        self.lost_conection = True
-        self.sockRecv.detach()
-        if (self.threadAudioRecv != None):
-            self.threadAudioRecv.join()
-        if (self.threadAudioRecv != None):
-            self.threadMsgSend.join()
+        self.socket.close()
+        self.connected = False
 
-    def myreceive(self):
-        try:
-            data, _ = self.sockRecv.recvfrom(BUFFER_SIZE)
-            return ((data[:-16], int.from_bytes(data[-16:-8], "big", signed=False), int.from_bytes(data[-8:], "big", signed=False)))
-        except so.timeout:
-            raise so.timeout
+    def send_message(self, message):
+        self.socket.sendto(message.encode(), (self.server_address, self.server_port))
+
+    def receive_data(self):
+        while self.connected:
+            if self.connect_attempts <= 0:
+                print("Closed connection from Audio Streaming Server")
+                raise ClosedConnection
+            else:
+                try:
+                    data, _ = self.socket.recvfrom(4096)  # Adjust buffer size as needed
+                    timestamp, parameter, audio_data = self.parse_packet(data)
+                    self.queue.put((timestamp, parameter, audio_data))
+                    self.connect_attempts = MAX_ATTEMPTS
+                except Exception as e:
+                    self.connect_attempts -= 1
+
+    def parse_packet(self, data):
+        timestamp = int.from_bytes(data[:8], byteorder='big')
+        parameter = int.from_bytes(data[8:16], byteorder='big', signed=True)
+        audio_data = data[16:]
+        return timestamp, parameter, audio_data
+
+    def start_audio_thread(self):
+        self.audio_thread = threading.Thread(target=self.receive_data)
+        self.audio_thread.start()
+
+    def ping_server(self):
+        while self.connected:
+            self.send_message("PING")
+            time.sleep(1)  # Adjust the interval as needed
+
+    def start(self):
+        self.connect()
+        self.start_audio_thread()
+        self.ping_thread = threading.Thread(target=self.ping_server)
+        self.ping_thread.start()
+
+    def stop(self):
+        if self.connected:
+            self.send_message("DISCONNECT-AUDIO")
+
+        self.connected = False
+
+        if self.ping_thread and self.ping_thread.is_alive():
+            self.ping_thread.join()
+
+        if self.audio_thread and self.audio_thread.is_alive():
+            self.audio_thread.join()
+
+        print("Disconnecting socket")
+        self.disconnect()
+
+    def emptyQueue(self):
+        self.queue = queue.Queue()
