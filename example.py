@@ -1,8 +1,7 @@
 from robobopy_audiostream.RoboboAudio import RoboboAudio
+from robobopy_audiostream.Exceptions import ClosedConnection
 from robobopy.Robobo import Robobo
 import pyaudio
-
-SERVER_IP = "192.168.1.238"
 
 p = pyaudio.PyAudio()
 FORMAT = pyaudio.paInt16
@@ -16,19 +15,30 @@ stream = p.open(format=FORMAT,
                 output=True,
                 frames_per_buffer=CHUNK)
 
-audio = RoboboAudio(SERVER_IP)
-audio.connect()
+server_address = 'YOUR_ROBOBO_IP_HERE'
 
-audio.syncAudioQueue()
-while True:
+rob = Robobo(server_address)
+rob.connect()
+
+rob.startAudioStream()
+
+robAudio = RoboboAudio(server_address)
+robAudio.connect()
+
+while robAudio.isConnected():
     try:
-        audioData = audio.getAudioWithMetadata()
-        if not audioData is None:
-            data, ts, snc = audioData
-            stream.write(data)
-        else:
-            break
+        data = robAudio.getAudioWithMetadata()
+        if (data != None):
+            # Process audio data as needed
+            timestamp, sync, audio_data = data
+            print(f"Timestamp: {timestamp}, Sync: {sync}, Audio Data Length: {len(audio_data)}")
+            stream.write(audio_data)
+    except ClosedConnection:
+        break
     except KeyboardInterrupt:
         break
-        
-audio.disconnect()
+
+robAudio.disconnect()
+
+rob.stopAudioStream()
+rob.disconnect()
