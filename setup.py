@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="robobopy_audiostream",            # This is the name of the package
-    version="1.0.0",                        # The release version
+    version="1.1.0",                        # The release version
     author="The Robobo Project",                  # Full name of the author
     author_email="info@theroboboproject.com",
     description="Robobo audio streaming library",
